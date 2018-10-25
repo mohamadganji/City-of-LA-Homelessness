@@ -4,9 +4,13 @@ library(ggplot2)
 library(shiny)
 library(lubridate)
 
+# Loading Cleaned Data
 load("calls311.RData")
 load("crime.Rdata")
 load("homeless_count.Rdata")
+
+
+##################    User Interface specifications  #####################
 
 ui <- fluidPage(
   titlePanel("Descriptive Analysis",
@@ -20,8 +24,10 @@ ui <- fluidPage(
       ),
       textInput(inputId = "tract", label = "Enter Tract Number (Leave it empty for having the whole data)" , ""),
       textInput(inputId = "CD", label = "Enter Council District Number (Leave it empty for having the whole data)" , ""),
-      #############################    #############################    #############################      
-      conditionalPanel(
+      
+      ### Further Options for a selected measure
+      
+      conditionalPanel(   # Crime Data
         condition = "input.select == 'Crime'",
         radioButtons(inputId = "crime_year", 
                     label = "Choose a Year",
@@ -37,8 +43,8 @@ ui <- fluidPage(
                                    "Race"), 
                     selected = "Month")
       ),
-      #############################    #############################    #############################      
-      conditionalPanel(
+      
+      conditionalPanel(   # 311 Calls
         condition = "input.select == '311 Calls'",
         radioButtons(inputId = "year_obs",
                      label = "Choose a Year: ",
@@ -60,6 +66,8 @@ ui <- fluidPage(
       )       
 
     ),
+  
+    #### Panel for Outputs
     
     mainPanel(
       plotOutput(outputId = "plot")
@@ -70,8 +78,10 @@ ui <- fluidPage(
   
 )
 
+##########################    Server to run the App ############################
+
 server <- function(input,output){
-  
+  ## Reactive objects to get tract number or council district number if user wants to look at reports only for that area
   tract=reactive({
     as.numeric(input$tract)
   })
@@ -79,9 +89,12 @@ server <- function(input,output){
     as.numeric(input$CD)
   })
   
+  
+  ## Creating Plots
   output$plot<- renderPlot({
     
-    if(input$select=="311 Calls"){
+#############################    #############################    #############################    
+    if(input$select=="311 Calls"){   # 311 calss plots
       
       whichData = reactive ({
         a= calls %>%
@@ -98,6 +111,7 @@ server <- function(input,output){
       })
       
       if(input$category == "a_req"){
+        
         # Request by Source
         ggplot(data = whichData() %>%
                  group_by(RequestSource) %>%
@@ -116,7 +130,8 @@ server <- function(input,output){
           ggtitle("Total Requests By source")+
           geom_text(aes(label = count),color="white", position = position_stack(vjust = .5),size=5,fontface = "bold") 
       }else if(input$category == "b_req"){
-        # Efficiency by Source
+        
+        # Efficiency by Source (rate of updating request status)
         ggplot(data = whichData() %>%
                  group_by(RequestSource)%>%
                  summarise(mean=round(mean(UpdateRate),2)),
@@ -133,6 +148,7 @@ server <- function(input,output){
           ylab("Update Duration (Hours)")+
           geom_text(aes(label = round(mean,0)),color="white", position = position_stack(vjust = .5),size=5,fontface = "bold")
       }else if(input$category == "c_req"){
+        
         # Total Request by Month 
         ggplot(data = whichData(), aes(x = factor(MonthCreated))) +
           geom_bar(fill = "darkred") +
@@ -151,6 +167,7 @@ server <- function(input,output){
         
         
       }else if(input$category == "d_req"){
+        
         # Total Request by Weekday
         ggplot(data = whichData(),aes(x = factor(WeekdayCreated))) +
           geom_bar(fill = "darkred") +
@@ -169,6 +186,7 @@ server <- function(input,output){
         
         
       }else if(input$category == "e_req"){
+        
         # Request Source by Month
         request_cbm = whichData() %>%
           group_by(RequestSource, MonthCreated) %>%
@@ -193,6 +211,7 @@ server <- function(input,output){
                 panel.grid = element_line(size = .1))
         
       }else if(input$category == "f_req"){
+        
         # Request Source by Weekday
         request_cbwh = whichData() %>%
           group_by(RequestSource, WeekdayCreated) %>%
@@ -217,11 +236,11 @@ server <- function(input,output){
       }  
       
 
+#############################    #############################    #############################    
       
-#############################      #############################    #############################    
-    }else if(input$select=="Crime"){
+    }else if(input$select=="Crime"){    # Crime Data Plots
       
-      ###First plot
+      
       data1=reactive({ 
         a= crime %>%
           filter(year == as.numeric(input$crime_year))
@@ -236,6 +255,7 @@ server <- function(input,output){
         return(a)
       })
       
+      ### Monthly Crime Reports
       if(input$crime_var=="Month"){
         ggplot(data1(),aes(x=month(DateOccurred,label=T,abbr=T)))+
           geom_bar(fill="darkred")+
@@ -252,7 +272,7 @@ server <- function(input,output){
       }
       
       
-      #second plot
+      #Day of Week Crime Reports
       else if(input$crime_var=="Week"){
         ggplot(data1(),aes(x=wday(DateOccurred,label=T,abbr=T)))+
           geom_bar(fill="darkred")+
@@ -266,7 +286,8 @@ server <- function(input,output){
                 panel.background = element_rect(fill="grey"),
                 panel.grid = element_line(size = .1))+
           geom_text(stat='count',aes(label = ..count..),color="white", position = position_stack(vjust = .5),size=5,fontface = "bold")
-      }else if(input$crime_var=="Age"){
+     
+         }else if(input$crime_var=="Age"){ # Crime Reprots by age and gender
         
         # data
         data3=data1() %>%
@@ -274,11 +295,7 @@ server <- function(input,output){
           filter(!is.na(VictimSex))%>%
           filter(!VictimSex=="X")
         
-        # data1$VictimSex=as.factor(data1$VictimSex)
-        # levels(data1$VictimSex)=c("Female","Male")
-        
-        ##third plot
-        ggplot(data3,aes(x=VictimAge))+
+          ggplot(data3,aes(x=VictimAge))+
           geom_histogram(binwidth=10,fill="darkred",color="black")+
           scale_x_continuous(breaks=seq(0,100,by=10))+
           labs(x="Victim Age",title="Male and Female Victims Age Distribution",y="Count")+
@@ -290,14 +307,14 @@ server <- function(input,output){
                 strip.text = element_text(size=16),
                 panel.background = element_rect(fill="grey"),
                 panel.grid = element_line(size = .1))
-      }else if(input$crime_var=="Race"){
+
+        }else if(input$crime_var=="Race"){  # Crime Reports by Race
         #data
         data4=data1() %>%
           group_by(VictimDescent)%>%
           summarise(count=n())%>%
           arrange(count)
-        
-        # fourth plot
+      
         ggplot(data4,aes(x=reorder(factor(VictimDescent),-count),y=count))+
           geom_bar(stat="identity",fill="darkred")+
           ylab("Count")+
@@ -315,8 +332,8 @@ server <- function(input,output){
       
       
 #############################    #############################    #############################    
-    }else{
-    
+    }else{     ## Homeless Count Plots
+     
       data=homeless_count
       
       if(!is.na(tract())&tract()%in%homeless_count$Tract ){

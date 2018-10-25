@@ -5,34 +5,37 @@ library(rgdal)
 library(ggmap)
 library(lubridate)
 
-
+### Load Cleaned Dataset
 load("crime.Rdata")
 load("calls311.RData")
 
+##################    User Interface specifications  #####################
 
 ui=fluidPage(
-  titlePanel("Geo-Spatial Visulization",windowTitle="Geo-Spatial Visulization"),
+  titlePanel("Geo-Spatial Visulization",windowTitle="Geo-Spatial Visulization"), # Title
   sidebarPanel(
-    textInput(inputId = "target_zone", label = "Search For a Place" , ""),
+    textInput(inputId = "target_zone", label = "Search For a Place" , ""),  # Search Bar
     
-    selectInput(inputId = "mapping",
+    selectInput(inputId = "mapping",           # Area Division Levels Option
                 label = "Choose the Mapping Level",
                 choices = list("Census Tract","Council District"),
                 selected="Census Tract"
     ),
     
-    checkboxInput("county", label = "Show the Whole LA County", value = FALSE),
+    checkboxInput("county", label = "Show the Whole LA County", value = FALSE),  # LA County vs LA City Choice For all Reports
     
-    selectInput(inputId = "select", label = "Select the Measure to Show", 
+    selectInput(inputId = "select", label = "Select the Measure to Show",         # Measures Option 
                 choices = list("Crime"="num_crime" , "Shelter"="num_shelt","311 Calls"="num_call","Homeless Count"="num_homeless","Combined Measure")),
     
-    conditionalPanel(
+    ### Further Options for a selected measure
+  
+    conditionalPanel(    # shelters
       condition = "input.select == 'num_shelt'",
       radioButtons("shelt_var", label = "Choose a Variable",
                    choices = list("Absolute Number of Shelters" = "num_shelt_abs", "Number of shelters/Number of Homeless")
       )
     ),    
-    conditionalPanel(
+    conditionalPanel(   #crime reports
       condition = "input.select == 'num_crime'",
       dateRangeInput(inputId = 'DateRange_Crime',
                      label = 'Date range for crime data: yyyy-mm-dd',
@@ -44,7 +47,7 @@ ui=fluidPage(
     ),
     
     
-    conditionalPanel(
+    conditionalPanel(    #311 Calls
       condition = "input.select == 'num_call'",
       dateRangeInput(inputId = 'DateRange_Call',
                      label = 'Date range for 311 calls: yyyy-mm-dd',
@@ -56,7 +59,7 @@ ui=fluidPage(
       )
     ),
     
-    conditionalPanel(
+    conditionalPanel(      # Homeless Head Counts
       condition = "input.select == 'num_homeless'",
       radioButtons("homeless_year", label = "Choose a Year",
                    choices = list("2017", "2016","2015")
@@ -65,8 +68,8 @@ ui=fluidPage(
                    choices = list("Homeless Count" = "num_homeless","Number of Homeless/Population"="num_homeless_normal","Unsheltered Rate" = "unshelt_rate")
       )
     ),
-    
-    conditionalPanel(
+  
+    conditionalPanel(      # Combined Measure
       condition="input.select == 'Combined Measure'",
       radioButtons("measure_year", label = "Choose a Year",
                    choices = list("2017", "2016","2015")
@@ -79,6 +82,8 @@ ui=fluidPage(
     )
     
   ),
+  
+  #### Panel for Outputs
   mainPanel(
              leafletOutput(outputId = "map",height = 340),
              plotOutput(outputId = "bar",height = 140)
@@ -86,10 +91,10 @@ ui=fluidPage(
     )
 )
 
-
+##########################    Server to run the App ############################
 server = function(input,output,session) {
   
-  
+  ### Reactive object for initializing the map, unless there is an input in search bar, this initialization runs only once 
   View=reactive({
     if(input$target_zone==""){
       return(c(9,34,-118.3650))
@@ -99,6 +104,7 @@ server = function(input,output,session) {
     }
   })
   
+  ### Load the background map
   output$map <- renderLeaflet({
     
     leaflet() %>% 
@@ -106,8 +112,10 @@ server = function(input,output,session) {
     
   })
   
+  ## Reactive object to load the divisions and data based on the chosen level, it will run once until the choice changes
   shape= reactive({
-    if (input$mapping=="Census Tract"){   #Census Tract Level
+                   #### #### #### Census Tract Level  #### #### ####
+    if (input$mapping=="Census Tract"){   
       shape=readRDS(file="Census-Tracts")
       b=crime%>%
         filter(DateOccurred<=input$DateRange_Crime[2]&DateOccurred>=input$DateRange_Crime[1])%>%
@@ -122,7 +130,9 @@ server = function(input,output,session) {
       shape=merge(shape,c,by.x="ct10",by.y="CensusTract")
       shape@data$num_call_abs[is.na(shape@data$num_call_abs)]=0
       shape@data$response[is.na(shape@data$response)]=0
-    }else{
+      
+                 #### #### ####  Council District Level   #### #### ####
+    }else{      
       shape=readRDS(file="Council-Districts")
       b=crime%>%
         filter(DateOccurred<=input$DateRange_Crime[2]&DateOccurred>=input$DateRange_Crime[1])%>%
@@ -141,14 +151,16 @@ server = function(input,output,session) {
       return(shape)
     }
     
+    # Filtering data for just LA City if LA county option is not chosen
     if (input$county==FALSE){
       shape=shape[shape$CD != 0,]
     }
     return(shape)
   })
   
+  ## Reactive object to create labels for each area
   labels= reactive({
-    if (input$mapping=="Census Tract"){   #Census Tract Level
+    if (input$mapping=="Census Tract"){     ### Census Tract Level:
       labels=
         sprintf(
           "<strong>Tract Number: </strong>%s<br/>
@@ -164,7 +176,7 @@ server = function(input,output,session) {
           shape()[[paste("rate",input$homeless_year,sep="_")]]) %>% 
         lapply(htmltools::HTML)
       return(labels)
-    }else{
+    }else{                          # Council district Level:
       labels=
         sprintf(
           "<strong>Council District Number: </strong>%g<br/>
@@ -184,6 +196,8 @@ server = function(input,output,session) {
   })
 
   ################################## Selected DATA  #################################  
+  ## Check if th ecombined measure is selected, reset date range choice to match all the measures that are being combined in terms of period.
+  # since counts are only available on yearly basis, this option only let user choose between different years
   observe({
     if(input$select=="Combined Measure"){
       updateDateRangeInput(session,inputId = "DateRange_Call",start=paste(input$measure_year,"-01-01",sep=""),end=paste(input$measure_year,"-12-31",sep=""))
@@ -191,45 +205,49 @@ server = function(input,output,session) {
     }
   })
   
-  
+  # reactive object to create measures only once if the choice doesn't change
   Data <- reactive({
+    # 311 calls:
     if(input$select=="num_call"){
-      if(input$call_var=="num_call_normal"){
+      if(input$call_var=="num_call_normal"){ ## percentage of total 311 calls in that area 
         a=shape()[["num_call_abs"]]/shape()[["num_homeless_2017"]]
-        a[which(a==Inf)]=(shape()[["num_call_abs"]][which(a==Inf)]+1)/(shape()[["num_homeless_2017"]][which(a==Inf)]+1)  # To avoid Infinity
+        a[which(a==Inf)]=(shape()[["num_call_abs"]][which(a==Inf)]+1)/(shape()[["num_homeless_2017"]][which(a==Inf)]+1)  # To avoid Infinity 
         return(a)
       }else{
       return(shape()[[input$call_var]])
       }
+    # homeless head counts
     }else if(input$select=="num_homeless"){
       if(input$homeless_var=="num_homeless"){
-        return(shape()[[paste("num_homeless",input$homeless_year,sep="_")]])
-      }else if(input$homeless_var=="unshelt_rate"){
+        return(shape()[[paste("num_homeless",input$homeless_year,sep="_")]])  # absolute number of homeless people
+      }else if(input$homeless_var=="unshelt_rate"){            ## Proportion of unsheltred homeless people
         return(shape()[[paste("rate",input$homeless_year,sep="_")]])
       }else{
-        a=shape()[[paste("num_homeless",input$homeless_year,sep="_")]]/shape()[["Pop"]]
-        a[which(a==Inf)]=(shape()[[paste("num_homeless",input$homeless_year,sep="_")]][which(a==Inf)]+1)/(shape()[["Pop"]][which(a==Inf)]+1)
+        a=shape()[[paste("num_homeless",input$homeless_year,sep="_")]]/shape()[["Pop"]]    ## normalizing based on population of area
+        a[which(a==Inf)]=(shape()[[paste("num_homeless",input$homeless_year,sep="_")]][which(a==Inf)]+1)/(shape()[["Pop"]][which(a==Inf)]+1)  # avoid infinity in case of zero denominator
         return(a)
       }
-      
+    # Crime reports:
     }else if(input$select=="num_crime"){
-      if(input$crime_var=="num_crime_abs"){
+      if(input$crime_var=="num_crime_abs"){  # absolute number of crime
         return(shape()[["num_crime"]])
       }else{
-        a=shape()[["num_crime"]]/shape()[["num_homeless_2017"]]
-        a[which(a==Inf)]=(shape()[["num_crime"]][which(a==Inf)]+1)/(shape()[["num_homeless_2017"]][which(a==Inf)]+1)
+        a=shape()[["num_crime"]]/shape()[["num_homeless_2017"]]   # percentage of toal crime in that are 
+        a[which(a==Inf)]=(shape()[["num_crime"]][which(a==Inf)]+1)/(shape()[["num_homeless_2017"]][which(a==Inf)]+1) #avoid infinity
         return(a)
       }
-      
+    # Shelter counts 
     }else if(input$select=="num_shelt"){
-      if(input$shelt_var=="num_shelt_abs"){
+      if(input$shelt_var=="num_shelt_abs"){  #absolute number of sheltes in the area
         return(shape()[["num_shelt"]])
       }else{
-        a=shape()[["num_shelt"]]/shape()[["num_homeless_2017"]]
+        a=shape()[["num_shelt"]]/shape()[["num_homeless_2017"]]     # normalizing based on number of homeless people
         a[which(a==Inf)]=(shape()[["num_shelt"]][which(a==Inf)]+1)/(shape()[["num_homeless_2017"]][which(a==Inf)]+1)
         return(a)
       }
-    }else{
+      
+    }else{  # calculating the combined measure based on the weights chosen by user
+            # to make different measure be compatible with each other and combine them in a meaningful way, all of them, for each area, are normalized to get percentages of total respective number
       a=input$shelt_w*(1-shape()[["num_shelt"]]/sum(shape()[["num_shelt"]])) +
         input$crime_w*shape()[["num_crime"]]/sum(shape()[["num_crime"]]) +
         input$call_w*shape()[["num_call_abs"]]/sum(shape()[["num_call_abs"]]) +
@@ -238,24 +256,27 @@ server = function(input,output,session) {
     }
   })
   
-  
+  # reactive object for creating heatmap colors for all areas
   pal= reactive({
     
       colorBin("YlOrRd",domain = Data(),bins =4)
     
   })
   
+  
+  ### Map output
   observe({
     
     leafletProxy("map",session) %>%
       
       clearShapes() %>%
       
-      addPolygons(data=shape(),weight=.5,col = 'black',
-                  fillColor = ~pal()(Data()),
-                  highlightOptions = highlightOptions(color = "red", weight = 2,
+      addPolygons(data=shape(),weight=.5,col = 'black', # divisions based on are levels chosen
+                  fillColor = ~pal()(Data()),    # loading colors for heatmap
+                  
+                  highlightOptions = highlightOptions(color = "red", weight = 2,  # highlighting an area when hovering
                                                       fillOpacity = .03,bringToFront = TRUE),
-                  label = labels(),
+                  label = labels(), # labels
                   labelOptions = labelOptions(
                     style = list("font-weight" = "normal", padding = "3px 8px"),
                     textsize = "15px",
@@ -264,26 +285,27 @@ server = function(input,output,session) {
     
   })
   
-  observe({
+  observe({  # legend for heatmap
     leafletProxy("map",session) %>%
       clearControls() %>%
       addLegend(pal = pal(),values =Data() , opacity = 0.7, title =NULL,
                 position = "bottomright")
   })
   
-  observe({
+  observe({     # intial zoom and center for the map
     leafletProxy("map",session) %>%
       setView(lng = View()[3],lat = View()[2],zoom = View()[1])
   })
   
+  # reactive object to create data for bar chart, showing top severe areas based on the selected measure
   plot_data=reactive({
-    if(input$mapping=="Census Tract"){
+    if(input$mapping=="Census Tract"){  # census tract level
       return(cbind(id=shape()$ct10,var=Data())%>%
                as.data.frame()%>%
                filter(!is.na(var))%>%
                arrange(-var)%>%
                slice(1:15))
-    }else{
+    }else{      # Council District Level
       return(cbind(id=shape()$district,var=Data())%>%
                as.data.frame()%>%
                filter(!is.na(var))%>%
@@ -292,6 +314,8 @@ server = function(input,output,session) {
     }
   })
   
+  
+  #### Creating Bar chart
   output$bar=renderPlot({
     plot_data() %>%
       ggplot(aes(x=reorder(id,-var),y=var,label=round(var,digits = 2)))+
